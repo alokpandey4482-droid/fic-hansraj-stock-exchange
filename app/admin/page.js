@@ -232,6 +232,27 @@ export default function Admin() {
               </div>
             ))}
         </div>
+               
+        {/* PRICE TRIGGER HISTORY */}
+<div className="bg-white/10 rounded-3xl p-10 mb-12 border-4 border-red-700">
+  <h3 className="text-5xl font-black mb-8 text-red-400">PRICE TRIGGER HISTORY</h3>
+  <div className="space-y-6">
+    {Object.entries(pendingNews)
+      .filter(([, n]) => n.priceTriggered)
+      .sort(([, a], [, b]) => (b.priceTriggerTime || 0) - (a.priceTriggerTime || 0))
+      .map(([id, n]) => (
+        <div key={id} className="bg-red-900/30 p-6 rounded-2xl border border-red-600">
+          <p className="text-3xl font-bold">{n.text}</p>
+          <p className="text-xl text-gray-300">
+            Shocked: {Object.keys(n.stocks || {}).filter(s => n.stocks[s]).join(", ")} (±{n.impact}%)
+          </p>
+          <p className="text-sm text-gray-500">
+            {new Date(n.priceTriggerTime || n.timestamp).toLocaleTimeString()}
+          </p>
+        </div>
+      ))}
+  </div>
+</div>
 
         {/* GOD BUTTONS */}
         <div className="grid grid-cols-2 lg:grid-cols-4 gap-10 max-w-6xl mx-auto">

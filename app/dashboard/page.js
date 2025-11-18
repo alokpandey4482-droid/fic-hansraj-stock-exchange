@@ -3,7 +3,7 @@
 
 import { useState, useEffect } from "react";
 import { db, auth } from "@/lib/firebase";
-import { ref, onValue, set, runTransaction } from "firebase/database";
+import { ref, onValue, set, runTransaction, push, get } from "firebase/database";
 import { onAuthStateChanged, signOut } from "firebase/auth";
 // import confetti from "canvas-confetti"; // optional, uncomment if you want confetti
 
@@ -16,10 +16,14 @@ export default function Dashboard() {
   const [message, setMessage] = useState("");
   const [timeLeft, setTimeLeft] = useState(600);
 
-  // NEW: live news, freeze state, and round
+  // NEW: live news, freeze state, and round (you already had liveNews/round/isFrozen)
   const [liveNews, setLiveNews] = useState([]);
   const [isFrozen, setIsFrozen] = useState(false);
   const [round, setRound] = useState(1);
+
+  // NEW: trade history and round-wise P&L for this user
+  const [tradeHistory, setTradeHistory] = useState([]);
+  const [roundPnL, setRoundPnL] = useState({});
 
   // Timer (client-side UI countdown; keep server-timed for game logic)
   useEffect(() => {
@@ -117,6 +121,32 @@ export default function Dashboard() {
     };
   }, []);
 
+  // --- NEW: personal trade history listener ---
+  useEffect(() => {
+    if (!user) return;
+    const histRef = ref(db, `tradeHistory/${user.uid}`);
+    const unsubscribe = onValue(histRef, (snap) => {
+      const data = snap.val();
+      if (data) {
+        // show latest first
+        setTradeHistory(Object.values(data).sort((a, b) => (b.timestamp || 0) - (a.timestamp || 0)));
+      } else {
+        setTradeHistory([]);
+      }
+    }, (err) => console.error("tradeHistory listener error:", err));
+    return () => unsubscribe();
+  }, [user]);
+
+  // --- NEW: round-wise P&L listener ---
+  useEffect(() => {
+    if (!user) return;
+    const pnlRef = ref(db, `roundPnL/${user.uid}`);
+    const unsubscribe = onValue(pnlRef, (snap) => {
+      setRoundPnL(snap.val() || {});
+    }, (err) => console.error("roundPnL listener error:", err));
+    return () => unsubscribe();
+  }, [user]);
+
   // Prepare ticker text
   const latestNews = liveNews[0];
   const newsText = latestNews
@@ -203,9 +233,27 @@ export default function Dashboard() {
         return current;
       });
 
-      // If transaction succeeded
-      setMessage(`${type === "BUY" ? "BOUGHT" : "SOLD"} ${Math.floor(Number(quantity))} × ${selectedStock} @ ₹${currentPrice.toFixed(2)}`);
+      // If transaction succeeded: record message and clear input
+      setMessage(`${type === "BUY" ? "BOUGHT" : "SOLD"} ${qty} × ${selectedStock} @ ₹${currentPrice.toFixed(2)}`);
       setQuantity("");
+
+      // --- NEW: push trade record to tradeHistory for this user ---
+      try {
+        const tradeRecord = {
+          type,
+          symbol: selectedStock,
+          quantity: qty,
+          price: currentPrice,
+          total: Math.round(currentPrice * qty * 100) / 100,
+          cashChange: type === "BUY" ? -currentPrice * qty : currentPrice * qty,
+          timestamp: Date.now(),
+          round: round,
+        };
+        await push(ref(db, `tradeHistory/${user.uid}`), tradeRecord);
+      } catch (errPush) {
+        console.error("Failed to push trade record:", errPush);
+      }
+
       // Optional celebration:
       // confetti({ particleCount: 200, spread: 70, origin: { y: 0.6 } });
 
@@ -261,6 +309,67 @@ export default function Dashboard() {
                   <span className="mx-16">{newsText}</span>
                 </div>
               </div>
+            </div>
+          </div>
+        </div>
+
+        {/* NEW: Latest News + Trade History / Round P&L (placed under ticker) */}
+        <div className="grid grid-cols-1 lg:grid-cols-2 gap-8 mb-8">
+          {/* LATEST NEWS */}
+          <div className="bg-white/5 rounded-3xl p-6 border-4 border-purple-700">
+            <h3 className="text-3xl font-black mb-4 text-cyan-400">LATEST NEWS</h3>
+            <div className="space-y-4 max-h-64 overflow-y-auto">
+              {liveNews.length === 0 ? (
+                <p className="text-center text-gray-500 text-lg">No news yet...</p>
+              ) : (
+                liveNews.map((n, i) => (
+                  <div key={i} className="bg-black/40 p-4 rounded-2xl border border-purple-800">
+                    <p className="text-xl font-bold text-yellow-400">{(n.severity || "").toUpperCase()}: {n.text}</p>
+                    <p className="text-sm text-gray-400 mt-2">{new Date(n.newsTriggerTime || n.timestamp || Date.now()).toLocaleString()}</p>
+                  </div>
+                ))
+              )}
+            </div>
+          </div>
+
+          {/* TRADE HISTORY + ROUND P&L */}
+          <div className="space-y-6">
+            <div className="bg-white/5 rounded-3xl p-6 border-4 border-green-700">
+              <h3 className="text-3xl font-black mb-4 text-green-400">TRADE HISTORY</h3>
+              <div className="space-y-3 max-h-64 overflow-y-auto text-lg">
+                {tradeHistory.length === 0 ? (
+                  <p className="text-center text-gray-500">No trades yet</p>
+                ) : (
+                  tradeHistory.map((t, i) => (
+                    <div key={i} className={`p-3 rounded-2xl ${t.type === "BUY" ? "bg-green-900/30" : "bg-red-900/30"}`}>
+                      <div className="flex justify-between items-center">
+                        <div className="font-semibold">{t.type} {t.quantity} × {t.symbol}</div>
+                        <div className="text-sm text-gray-300">Round {t.round}</div>
+                      </div>
+                      <div className="flex justify-between mt-2">
+                        <div className="text-sm text-gray-300">₹{Number(t.price).toFixed(2)} each</div>
+                        <div className="font-bold">{t.cashChange > 0 ? "+" : ""}₹{Math.abs(Math.round(t.cashChange)).toLocaleString()}</div>
+                      </div>
+                      <div className="text-right text-xs text-gray-400 mt-2">{new Date(t.timestamp || 0).toLocaleTimeString()}</div>
+                    </div>
+                  ))
+                )}
+              </div>
+            </div>
+
+            <div className="bg-white/5 rounded-3xl p-6 border-4 border-yellow-700">
+              <h3 className="text-3xl font-black mb-4 text-yellow-400">ROUND P&L</h3>
+              {Object.entries(roundPnL).length === 0 ? (
+                <p className="text-center text-gray-500 text-lg">No P&L yet</p>
+              ) : (
+                <div className="space-y-3">
+                  {Object.entries(roundPnL).map(([r, p]) => (
+                    <div key={r} className={`text-xl font-bold ${p > 0 ? "text-green-400" : "text-red-400"}`}>
+                      Round {r}: {p > 0 ? "+" : ""}₹{Number(p).toLocaleString()}
+                    </div>
+                  ))}
+                </div>
+              )}
             </div>
           </div>
         </div>

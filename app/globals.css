@@ -2,12 +2,41 @@
 @tailwind components;
 @tailwind utilities;
 
+/* Marquee keyframes & classes (accessible + responsive) */
 @keyframes marquee {
   0% { transform: translateX(100%); }
   100% { transform: translateX(-100%); }
 }
 
+/* Visible marquee container: hides overflow and provides clipping */
+.marquee-wrapper {
+  position: relative;
+  overflow: hidden;
+  width: 100%;
+  display: block;
+}
+
+/* The moving content — keep it inline-block and use transform for smooth hardware-accelerated animation */
 .animate-marquee {
   display: inline-block;
+  white-space: nowrap;
+  will-change: transform;
   animation: marquee 25s linear infinite;
+}
+
+/* Faster marquee on large screens (optional) */
+@media (min-width: 1024px) {
+  .animate-marquee {
+    animation-duration: 18s;
+  }
+}
+
+/* Respect users who prefer reduced motion */
+@media (prefers-reduced-motion: reduce) {
+  .animate-marquee {
+    animation: none;
+    /* fall back to static left-aligned text for readability */
+    display: block;
+    transform: none;
+  }
 }
